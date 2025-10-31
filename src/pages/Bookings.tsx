@@ -10,8 +10,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Plus, LogOut } from "lucide-react";
+import { Plus, LogOut, AlertCircle } from "lucide-react";
+import { format } from "date-fns";
 
 interface Booking {
   id: string;
@@ -62,9 +64,12 @@ export default function Bookings() {
     guest_id: "",
     room_id: "",
     check_in_date: "",
+    check_in_time: "14:00",
     check_out_date: "",
+    check_out_time: "12:00",
     notes: "",
   });
+  const [filterStatus, setFilterStatus] = useState<"all" | "active" | "checked_out">("all");
 
   useEffect(() => {
     loadData();
@@ -102,8 +107,60 @@ export default function Bookings() {
     return nights * room.price_per_night;
   };
 
+  const checkRoomAvailability = async (roomId: string, checkIn: string, checkOut: string) => {
+    const { data, error } = await supabase
+      .from("bookings")
+      .select("id")
+      .eq("room_id", roomId)
+      .eq("status", "active")
+      .or(`and(check_in_date.lte.${checkOut},check_out_date.gte.${checkIn})`);
+
+    if (error) {
+      console.error("Error checking availability:", error);
+      return false;
+    }
+
+    return data.length === 0;
+  };
+
+  const validateDates = (checkIn: string, checkOut: string) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const checkInDate = new Date(checkIn);
+    const checkOutDate = new Date(checkOut);
+
+    if (checkInDate < today) {
+      toast.error("A data de check-in não pode ser no passado");
+      return false;
+    }
+
+    if (checkOutDate <= checkInDate) {
+      toast.error("A data de check-out deve ser posterior ao check-in");
+      return false;
+    }
+
+    return true;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Validate dates
+    if (!validateDates(formData.check_in_date, formData.check_out_date)) {
+      return;
+    }
+
+    // Check room availability
+    const isAvailable = await checkRoomAvailability(
+      formData.room_id,
+      formData.check_in_date,
+      formData.check_out_date
+    );
+
+    if (!isAvailable) {
+      toast.error("Este quarto já está reservado para o período selecionado");
+      return;
+    }
 
     const totalPrice = calculateTotalPrice(
       formData.room_id,
@@ -111,8 +168,15 @@ export default function Bookings() {
       formData.check_out_date
     );
 
+    const checkInDateTime = `${formData.check_in_date}T${formData.check_in_time}:00`;
+    const checkOutDateTime = `${formData.check_out_date}T${formData.check_out_time}:00`;
+
     const bookingData = {
-      ...formData,
+      guest_id: formData.guest_id,
+      room_id: formData.room_id,
+      check_in_date: checkInDateTime,
+      check_out_date: checkOutDateTime,
+      notes: formData.notes,
       total_price: totalPrice,
       status: "active" as "active",
     };
@@ -121,6 +185,7 @@ export default function Bookings() {
 
     if (error) {
       toast.error("Erro ao criar hospedagem");
+      console.error(error);
     } else {
       // Update room status to occupied
       await supabase
@@ -165,13 +230,29 @@ export default function Bookings() {
       guest_id: "",
       room_id: "",
       check_in_date: "",
+      check_in_time: "14:00",
       check_out_date: "",
+      check_out_time: "12:00",
       notes: "",
     });
     setDialogOpen(false);
   };
 
   const availableRooms = rooms.filter((r) => r.status === "available");
+
+  const filteredBookings = bookings.filter((booking) => {
+    if (filterStatus === "all") return true;
+    return booking.status === filterStatus;
+  });
+
+  const activeBookings = bookings.filter((b) => b.status === "active");
+  const today = format(new Date(), "yyyy-MM-dd");
+  const todayCheckIns = activeBookings.filter((b) => b.check_in_date.startsWith(today));
+  const todayCheckOuts = activeBookings.filter((b) => b.check_out_date.startsWith(today));
+
+  const getTodayMinDate = () => {
+    return format(new Date(), "yyyy-MM-dd");
+  };
 
   return (
     <Layout>
@@ -233,27 +314,59 @@ export default function Bookings() {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="check_in_date">Check-in *</Label>
+                    <Label htmlFor="check_in_date">Data Check-in *</Label>
                     <Input
                       id="check_in_date"
                       type="date"
                       value={formData.check_in_date}
                       onChange={(e) => setFormData({ ...formData, check_in_date: e.target.value })}
+                      min={getTodayMinDate()}
                       required
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="check_out_date">Check-out Previsto *</Label>
+                    <Label htmlFor="check_in_time">Horário Check-in *</Label>
+                    <Input
+                      id="check_in_time"
+                      type="time"
+                      value={formData.check_in_time}
+                      onChange={(e) => setFormData({ ...formData, check_in_time: e.target.value })}
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="check_out_date">Data Check-out *</Label>
                     <Input
                       id="check_out_date"
                       type="date"
                       value={formData.check_out_date}
                       onChange={(e) => setFormData({ ...formData, check_out_date: e.target.value })}
                       required
-                      min={formData.check_in_date}
+                      min={formData.check_in_date || getTodayMinDate()}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="check_out_time">Horário Check-out *</Label>
+                    <Input
+                      id="check_out_time"
+                      type="time"
+                      value={formData.check_out_time}
+                      onChange={(e) => setFormData({ ...formData, check_out_time: e.target.value })}
+                      required
                     />
                   </div>
                 </div>
+                {formData.check_in_date && formData.check_out_date && (
+                  <div className="flex items-start gap-2 p-3 bg-accent/30 rounded-lg border border-accent">
+                    <AlertCircle className="w-4 h-4 mt-0.5 text-primary" />
+                    <div className="text-sm">
+                      <p className="font-medium">Horários padrão:</p>
+                      <p className="text-muted-foreground">Check-in: 14h | Check-out: 12h</p>
+                    </div>
+                  </div>
+                )}
                 {formData.room_id && formData.check_in_date && formData.check_out_date && (
                   <div className="p-4 bg-muted rounded-lg">
                     <p className="text-sm font-medium">
@@ -286,15 +399,54 @@ export default function Bookings() {
           </Dialog>
         </div>
 
+        {/* Today's Summary */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium">Hóspedes Ativos</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold">{activeBookings.length}</div>
+              <p className="text-xs text-muted-foreground mt-1">Total de hospedagens ativas</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium">Check-ins Hoje</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-success">{todayCheckIns.length}</div>
+              <p className="text-xs text-muted-foreground mt-1">Chegadas previstas</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium">Check-outs Hoje</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-warning">{todayCheckOuts.length}</div>
+              <p className="text-xs text-muted-foreground mt-1">Saídas previstas</p>
+            </CardContent>
+          </Card>
+        </div>
+
         <Card>
           <CardHeader>
             <CardTitle>Lista de Hospedagens</CardTitle>
           </CardHeader>
           <CardContent>
+            <Tabs value={filterStatus} onValueChange={(v) => setFilterStatus(v as any)} className="mb-4">
+              <TabsList>
+                <TabsTrigger value="all">Todas</TabsTrigger>
+                <TabsTrigger value="active">Ativas ({activeBookings.length})</TabsTrigger>
+                <TabsTrigger value="checked_out">Finalizadas</TabsTrigger>
+              </TabsList>
+            </Tabs>
+
             {loading ? (
               <p className="text-center py-8 text-muted-foreground">Carregando...</p>
-            ) : bookings.length === 0 ? (
-              <p className="text-center py-8 text-muted-foreground">Nenhuma hospedagem registrada</p>
+            ) : filteredBookings.length === 0 ? (
+              <p className="text-center py-8 text-muted-foreground">Nenhuma hospedagem encontrada</p>
             ) : (
               <Table>
                 <TableHeader>
@@ -309,40 +461,61 @@ export default function Bookings() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {bookings.map((booking) => (
-                    <TableRow key={booking.id}>
-                      <TableCell className="font-medium">{booking.guests.full_name}</TableCell>
-                      <TableCell>
-                        Quarto {booking.rooms.room_number}
-                        <br />
-                        <span className="text-xs text-muted-foreground">{booking.rooms.room_type}</span>
-                      </TableCell>
-                      <TableCell>{new Date(booking.check_in_date).toLocaleDateString("pt-BR")}</TableCell>
-                      <TableCell>
-                        {booking.actual_check_out
-                          ? new Date(booking.actual_check_out).toLocaleDateString("pt-BR")
-                          : new Date(booking.check_out_date).toLocaleDateString("pt-BR")}
-                      </TableCell>
-                      <TableCell className="font-medium">R$ {booking.total_price.toFixed(2)}</TableCell>
-                      <TableCell>
-                        <Badge className={statusColors[booking.status]}>
-                          {statusLabels[booking.status]}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {booking.status === "active" && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleCheckOut(booking)}
-                          >
-                            <LogOut className="w-4 h-4 mr-1" />
-                            Check-out
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {filteredBookings.map((booking) => {
+                    const checkInDate = booking.check_in_date.split("T")[0];
+                    const checkOutDate = booking.check_out_date.split("T")[0];
+                    const isCheckInToday = checkInDate === today;
+                    const isCheckOutToday = checkOutDate === today;
+
+                    return (
+                      <TableRow key={booking.id} className={isCheckInToday || isCheckOutToday ? "bg-accent/50" : ""}>
+                        <TableCell className="font-medium">
+                          {booking.guests.full_name}
+                          {isCheckInToday && (
+                            <Badge variant="outline" className="ml-2 text-xs bg-success/10">
+                              Chegada hoje
+                            </Badge>
+                          )}
+                          {isCheckOutToday && booking.status === "active" && (
+                            <Badge variant="outline" className="ml-2 text-xs bg-warning/10">
+                              Saída hoje
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          Quarto {booking.rooms.room_number}
+                          <br />
+                          <span className="text-xs text-muted-foreground">{booking.rooms.room_type}</span>
+                        </TableCell>
+                        <TableCell>
+                          {format(new Date(booking.check_in_date), "dd/MM/yyyy HH:mm")}
+                        </TableCell>
+                        <TableCell>
+                          {booking.actual_check_out
+                            ? format(new Date(booking.actual_check_out), "dd/MM/yyyy HH:mm")
+                            : format(new Date(booking.check_out_date), "dd/MM/yyyy HH:mm")}
+                        </TableCell>
+                        <TableCell className="font-medium">R$ {booking.total_price.toFixed(2)}</TableCell>
+                        <TableCell>
+                          <Badge className={statusColors[booking.status]}>
+                            {statusLabels[booking.status]}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {booking.status === "active" && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleCheckOut(booking)}
+                            >
+                              <LogOut className="w-4 h-4 mr-1" />
+                              Check-out
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             )}
