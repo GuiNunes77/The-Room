@@ -10,6 +10,38 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2 } from "lucide-react";
+import { z } from "zod";
+
+const guestSchema = z.object({
+  full_name: z.string()
+    .trim()
+    .min(2, "Nome deve ter no mínimo 2 caracteres")
+    .max(100, "Nome deve ter no máximo 100 caracteres"),
+  document_number: z.string()
+    .trim()
+    .min(5, "Documento deve ter no mínimo 5 caracteres")
+    .max(20, "Documento deve ter no máximo 20 caracteres"),
+  email: z.string()
+    .trim()
+    .email("Email inválido")
+    .max(255, "Email deve ter no máximo 255 caracteres")
+    .optional()
+    .or(z.literal("")),
+  phone: z.string()
+    .trim()
+    .max(20, "Telefone deve ter no máximo 20 caracteres")
+    .optional()
+    .or(z.literal("")),
+  address: z.string()
+    .trim()
+    .max(500, "Endereço deve ter no máximo 500 caracteres")
+    .optional()
+    .or(z.literal("")),
+  notes: z.string()
+    .max(1000, "Observações devem ter no máximo 1000 caracteres")
+    .optional()
+    .or(z.literal("")),
+});
 
 interface Guest {
   id: string;
@@ -58,28 +90,49 @@ export default function Guests() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (editingGuest) {
-      const { error } = await supabase
-        .from("guests")
-        .update(formData)
-        .eq("id", editingGuest.id);
+    // Validate form data
+    try {
+      const validatedData = guestSchema.parse(formData);
+      
+      // Clean empty strings for optional fields
+      const cleanData = {
+        ...validatedData,
+        email: validatedData.email || null,
+        phone: validatedData.phone || null,
+        address: validatedData.address || null,
+        notes: validatedData.notes || null,
+      };
 
-      if (error) {
-        toast.error("Erro ao atualizar hóspede");
+      if (editingGuest) {
+        const { error } = await supabase
+          .from("guests")
+          .update(cleanData as any)
+          .eq("id", editingGuest.id);
+
+        if (error) {
+          toast.error("Erro ao atualizar hóspede");
+        } else {
+          toast.success("Hóspede atualizado com sucesso!");
+          resetForm();
+          loadGuests();
+        }
       } else {
-        toast.success("Hóspede atualizado com sucesso!");
-        resetForm();
-        loadGuests();
+        const { error } = await supabase.from("guests").insert([cleanData as any]);
+
+        if (error) {
+          toast.error("Erro ao cadastrar hóspede");
+        } else {
+          toast.success("Hóspede cadastrado com sucesso!");
+          resetForm();
+          loadGuests();
+        }
       }
-    } else {
-      const { error } = await supabase.from("guests").insert([formData]);
-
-      if (error) {
-        toast.error("Erro ao cadastrar hóspede");
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        const firstError = error.errors[0];
+        toast.error(firstError.message);
       } else {
-        toast.success("Hóspede cadastrado com sucesso!");
-        resetForm();
-        loadGuests();
+        toast.error("Erro ao validar dados");
       }
     }
   };

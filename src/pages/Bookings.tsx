@@ -14,6 +14,28 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Plus, LogOut, AlertCircle } from "lucide-react";
 import { format } from "date-fns";
+import { z } from "zod";
+
+const bookingSchema = z.object({
+  guest_id: z.string()
+    .uuid("Selecione um hóspede válido")
+    .min(1, "Hóspede é obrigatório"),
+  room_id: z.string()
+    .uuid("Selecione um quarto válido")
+    .min(1, "Quarto é obrigatório"),
+  check_in_date: z.string()
+    .min(1, "Data de check-in é obrigatória"),
+  check_in_time: z.string()
+    .regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/, "Horário de check-in inválido"),
+  check_out_date: z.string()
+    .min(1, "Data de check-out é obrigatória"),
+  check_out_time: z.string()
+    .regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/, "Horário de check-out inválido"),
+  notes: z.string()
+    .max(1000, "Observações devem ter no máximo 1000 caracteres")
+    .optional()
+    .or(z.literal("")),
+});
 
 interface Booking {
   id: string;
@@ -145,57 +167,69 @@ export default function Bookings() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validate dates
-    if (!validateDates(formData.check_in_date, formData.check_out_date)) {
-      return;
-    }
+    try {
+      // Validate form data with zod
+      const validatedData = bookingSchema.parse(formData);
 
-    // Check room availability
-    const isAvailable = await checkRoomAvailability(
-      formData.room_id,
-      formData.check_in_date,
-      formData.check_out_date
-    );
+      // Validate dates
+      if (!validateDates(validatedData.check_in_date, validatedData.check_out_date)) {
+        return;
+      }
 
-    if (!isAvailable) {
-      toast.error("Este quarto já está reservado para o período selecionado");
-      return;
-    }
+      // Check room availability
+      const isAvailable = await checkRoomAvailability(
+        validatedData.room_id,
+        validatedData.check_in_date,
+        validatedData.check_out_date
+      );
 
-    const totalPrice = calculateTotalPrice(
-      formData.room_id,
-      formData.check_in_date,
-      formData.check_out_date
-    );
+      if (!isAvailable) {
+        toast.error("Este quarto já está reservado para o período selecionado");
+        return;
+      }
 
-    const checkInDateTime = `${formData.check_in_date}T${formData.check_in_time}:00`;
-    const checkOutDateTime = `${formData.check_out_date}T${formData.check_out_time}:00`;
+      const totalPrice = calculateTotalPrice(
+        validatedData.room_id,
+        validatedData.check_in_date,
+        validatedData.check_out_date
+      );
 
-    const bookingData = {
-      guest_id: formData.guest_id,
-      room_id: formData.room_id,
-      check_in_date: checkInDateTime,
-      check_out_date: checkOutDateTime,
-      notes: formData.notes,
-      total_price: totalPrice,
-      status: "active" as "active",
-    };
+      const checkInDateTime = `${validatedData.check_in_date}T${validatedData.check_in_time}:00`;
+      const checkOutDateTime = `${validatedData.check_out_date}T${validatedData.check_out_time}:00`;
 
-    const { error } = await supabase.from("bookings").insert([bookingData]);
+      const bookingData = {
+        guest_id: validatedData.guest_id,
+        room_id: validatedData.room_id,
+        check_in_date: checkInDateTime,
+        check_out_date: checkOutDateTime,
+        notes: validatedData.notes || null,
+        total_price: totalPrice,
+        status: "active" as "active",
+      };
 
-    if (error) {
-      toast.error("Erro ao criar hospedagem");
-      console.error(error);
-    } else {
-      // Update room status to occupied
-      await supabase
-        .from("rooms")
-        .update({ status: "occupied" })
-        .eq("id", formData.room_id);
+      const { error } = await supabase.from("bookings").insert([bookingData]);
 
-      toast.success("Hospedagem criada com sucesso!");
-      resetForm();
-      loadData();
+      if (error) {
+        toast.error("Erro ao criar hospedagem");
+        console.error(error);
+      } else {
+        // Update room status to occupied
+        await supabase
+          .from("rooms")
+          .update({ status: "occupied" })
+          .eq("id", validatedData.room_id);
+
+        toast.success("Hospedagem criada com sucesso!");
+        resetForm();
+        loadData();
+      }
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        const firstError = error.errors[0];
+        toast.error(firstError.message);
+      } else {
+        toast.error("Erro ao validar dados");
+      }
     }
   };
 

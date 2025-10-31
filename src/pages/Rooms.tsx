@@ -11,6 +11,39 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2 } from "lucide-react";
+import { z } from "zod";
+
+const roomSchema = z.object({
+  room_number: z.string()
+    .trim()
+    .min(1, "Número do quarto é obrigatório")
+    .max(10, "Número do quarto deve ter no máximo 10 caracteres"),
+  room_type: z.string()
+    .trim()
+    .min(2, "Tipo deve ter no mínimo 2 caracteres")
+    .max(50, "Tipo deve ter no máximo 50 caracteres"),
+  description: z.string()
+    .max(500, "Descrição deve ter no máximo 500 caracteres")
+    .optional()
+    .or(z.literal("")),
+  capacity: z.number()
+    .int("Capacidade deve ser um número inteiro")
+    .min(1, "Capacidade deve ser no mínimo 1")
+    .max(20, "Capacidade deve ser no máximo 20"),
+  price_per_night: z.number()
+    .positive("Preço deve ser maior que zero")
+    .max(100000, "Preço muito alto"),
+  status: z.enum(["available", "occupied", "maintenance", "cleaning"]),
+  floor: z.number()
+    .int("Andar deve ser um número inteiro")
+    .min(0, "Andar não pode ser negativo")
+    .max(100, "Andar muito alto")
+    .optional()
+    .nullable(),
+  amenities: z.array(z.string().trim())
+    .optional()
+    .nullable(),
+});
 
 interface Room {
   id: string;
@@ -76,39 +109,52 @@ export default function Rooms() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    const roomData = {
-      room_number: formData.room_number,
-      room_type: formData.room_type,
-      description: formData.description || null,
-      capacity: parseInt(formData.capacity),
-      price_per_night: parseFloat(formData.price_per_night),
-      status: formData.status as "available" | "occupied" | "maintenance" | "cleaning",
-      floor: formData.floor ? parseInt(formData.floor) : null,
-      amenities: formData.amenities ? formData.amenities.split(",").map(a => a.trim()) : null,
-    };
+    try {
+      // Parse and validate form data
+      const roomData = {
+        room_number: formData.room_number,
+        room_type: formData.room_type,
+        description: formData.description || null,
+        capacity: parseInt(formData.capacity),
+        price_per_night: parseFloat(formData.price_per_night),
+        status: formData.status as "available" | "occupied" | "maintenance" | "cleaning",
+        floor: formData.floor ? parseInt(formData.floor) : null,
+        amenities: formData.amenities ? formData.amenities.split(",").map(a => a.trim()).filter(a => a) : null,
+      };
 
-    if (editingRoom) {
-      const { error } = await supabase
-        .from("rooms")
-        .update(roomData)
-        .eq("id", editingRoom.id);
+      // Validate with zod
+      const validatedData = roomSchema.parse(roomData);
 
-      if (error) {
-        toast.error("Erro ao atualizar quarto");
+      if (editingRoom) {
+        const { error } = await supabase
+          .from("rooms")
+          .update(validatedData as any)
+          .eq("id", editingRoom.id);
+
+        if (error) {
+          toast.error("Erro ao atualizar quarto");
+        } else {
+          toast.success("Quarto atualizado com sucesso!");
+          resetForm();
+          loadRooms();
+        }
       } else {
-        toast.success("Quarto atualizado com sucesso!");
-        resetForm();
-        loadRooms();
+        const { error } = await supabase.from("rooms").insert([validatedData as any]);
+
+        if (error) {
+          toast.error("Erro ao cadastrar quarto");
+        } else {
+          toast.success("Quarto cadastrado com sucesso!");
+          resetForm();
+          loadRooms();
+        }
       }
-    } else {
-      const { error } = await supabase.from("rooms").insert([roomData]);
-
-      if (error) {
-        toast.error("Erro ao cadastrar quarto");
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        const firstError = error.errors[0];
+        toast.error(firstError.message);
       } else {
-        toast.success("Quarto cadastrado com sucesso!");
-        resetForm();
-        loadRooms();
+        toast.error("Erro ao validar dados");
       }
     }
   };
