@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -77,6 +78,7 @@ const statusLabels = {
 };
 
 export default function Bookings() {
+  const { user } = useAuth();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [guests, setGuests] = useState<Guest[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -205,6 +207,7 @@ export default function Bookings() {
         notes: validatedData.notes || null,
         total_price: totalPrice,
         status: "active" as "active",
+        created_by: user?.id
       };
 
       const { error } = await supabase.from("bookings").insert([bookingData]);

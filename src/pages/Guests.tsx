@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -55,6 +56,7 @@ interface Guest {
 }
 
 export default function Guests() {
+  const { user } = useAuth();
   const [guests, setGuests] = useState<Guest[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -117,7 +119,11 @@ export default function Guests() {
           loadGuests();
         }
       } else {
-        const { error } = await supabase.from("guests").insert([cleanData as any]);
+        const guestData = {
+          ...cleanData,
+          created_by: user?.id
+        };
+        const { error } = await supabase.from("guests").insert([guestData as any]);
 
         if (error) {
           toast.error("Erro ao cadastrar hóspede");
